@@ -1,42 +1,80 @@
-name: Build Unison ARM (patched to 14393)
+
+name: Build Unison ARM (Windows 10 Mobile 14393)
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: windows-2022
+
     steps:
       - uses: actions/checkout@v4
 
       - uses: microsoft/setup-msbuild@v2
 
-      - name: Lower minimum OS version to 14393
+      - name: Verify Windows SDK and UWP tools
         shell: pwsh
         run: |
-          Get-ChildItem -Recurse -Filter Package.appxmanifest | ForEach-Object {
-            (Get-Content $_.FullName -Raw) `
-              -replace 'MinVersion="10\.0\.15063\.0"', 'MinVersion="10.0.14393.0"' |
-              Set-Content $_.FullName -NoNewline
-            Write-Host "Patched $($_.FullName)"
+          $sdk = "${env:ProgramFiles(x86)}\Windows Kits\10\Lib\10.0.22621.0"
+
+          if (!(Test-Path $sdk)) {
+            throw "Windows SDK 10.0.22621.0 is missing!"
           }
+
+          Write-Host "Windows SDK 22621 found."
+
+          Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Lib" |
+            Select-Object -ExpandProperty Name
+
+      - name: Patch minimum OS version
+        shell: pwsh
+        run: |
           Get-ChildItem -Recurse -Filter *.csproj | ForEach-Object {
-            (Get-Content $_.FullName -Raw) `
-              -replace '<TargetPlatformMinVersion>10\.0\.15063\.0</TargetPlatformMinVersion>', '<TargetPlatformMinVersion>10.0.14393.0</TargetPlatformMinVersion>' |
-              Set-Content $_.FullName -NoNewline
+            $file = $_.FullName
+            $content = Get-Content $file -Raw
+
+            $content = $content -replace `
+              '<TargetPlatformMinVersion>[^<]+</TargetPlatformMinVersion>', `
+              '<TargetPlatformMinVersion>10.0.14393.0</TargetPlatformMinVersion>'
+
+            Set-Content $file $content -NoNewline
+            Write-Host "Patched $file"
           }
 
-      - name: List project files
-        shell: pwsh
-        run: |
-          Get-ChildItem -Recurse -Include *.csproj,*.appxmanifest,*.slnx |
-            Select-Object -ExpandProperty FullName
+          Get-ChildItem -Recurse -Filter Package.appxmanifest | ForEach-Object {
+            $file = $_.FullName
+            $content = Get-Content $file -Raw
 
-      - name: Build ARM Release (.NET Native)
+            $content = $content -replace `
+              'MinVersion="[^"]+"', `
+              'MinVersion="10.0.14393.0"'
+
+            Set-Content $file $content -NoNewline
+            Write-Host "Patched $file"
+          }
+
+      - name: Verify patched versions
         shell: pwsh
         run: |
-          $proj = Get-ChildItem -Recurse -Filter Unison.Uwp.csproj | Select-Object -First 1
+          Get-ChildItem -Recurse -Filter *.csproj |
+            Select-String "TargetPlatformMinVersion"
+
+          Get-ChildItem -Recurse -Filter Package.appxmanifest |
+            Select-String 'MinVersion='
+
+      - name: Build ARM Release
+        shell: pwsh
+        run: |
+          $proj = Get-ChildItem -Recurse -Filter Unison.Uwp.csproj |
+            Select-Object -First 1
+
+          if (!$proj) {
+            throw "Unison.Uwp.csproj not found!"
+          }
+
           Write-Host "Building $($proj.FullName)"
+
           msbuild $proj.FullName /restore `
             /p:Configuration=Release `
             /p:Platform=ARM `
