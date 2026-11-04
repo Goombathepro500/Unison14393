@@ -54,6 +54,35 @@ jobs:
             Write-Host "Patched $file"
           }
 
+      - name: Diagnose UWP references
+        shell: pwsh
+        run: |
+          $kit = "${env:ProgramFiles(x86)}\Windows Kits\10"
+
+          Write-Host "=== Windows SDK directories ==="
+          Get-ChildItem "$kit\UnionMetadata" -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty Name
+
+          Write-Host "=== Windows reference directories ==="
+          Get-ChildItem "$kit\References" -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty Name
+
+          Write-Host "=== Windows.winmd files ==="
+          Get-ChildItem "$kit" -Filter Windows.winmd -Recurse `
+            -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty FullName
+
+          Write-Host "=== UWP NuGet package ==="
+          $pkg = "$env:USERPROFILE\.nuget\packages\microsoft.netcore.universalwindowsplatform\6.2.14"
+          Write-Host "Package exists: $(Test-Path $pkg)"
+
+          Write-Host "=== Visual Studio UWP workload ==="
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+
+          & $vswhere -latest -products '*' `
+            -requires Microsoft.VisualStudio.ComponentGroup.UWP.NetCoreAndStandard `
+            -property installationPath
+
       - name: Verify patched versions
         shell: pwsh
         run: |
