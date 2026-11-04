@@ -1,0 +1,51 @@
+name: Build Unison ARM (patched to 14393)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: microsoft/setup-msbuild@v2
+
+      - name: Lower minimum OS version to 14393
+        shell: pwsh
+        run: |
+          Get-ChildItem -Recurse -Filter Package.appxmanifest | ForEach-Object {
+            (Get-Content $_.FullName -Raw) `
+              -replace 'MinVersion="10\.0\.15063\.0"', 'MinVersion="10.0.14393.0"' |
+              Set-Content $_.FullName -NoNewline
+            Write-Host "Patched $($_.FullName)"
+          }
+          Get-ChildItem -Recurse -Filter *.csproj | ForEach-Object {
+            (Get-Content $_.FullName -Raw) `
+              -replace '<TargetPlatformMinVersion>10\.0\.15063\.0</TargetPlatformMinVersion>', '<TargetPlatformMinVersion>10.0.14393.0</TargetPlatformMinVersion>' |
+              Set-Content $_.FullName -NoNewline
+          }
+
+      - name: List project files
+        shell: pwsh
+        run: |
+          Get-ChildItem -Recurse -Include *.csproj,*.appxmanifest,*.slnx |
+            Select-Object -ExpandProperty FullName
+
+      - name: Build ARM Release (.NET Native)
+        shell: pwsh
+        run: |
+          $proj = Get-ChildItem -Recurse -Filter Unison.Uwp.csproj | Select-Object -First 1
+          Write-Host "Building $($proj.FullName)"
+          msbuild $proj.FullName /restore `
+            /p:Configuration=Release `
+            /p:Platform=ARM `
+            /p:AppxBundle=Never `
+            /p:UapAppxPackageBuildMode=SideloadOnly `
+            /p:AppxPackageSigningEnabled=false `
+            /p:AppxPackageDir="$env:GITHUB_WORKSPACE\out\"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: unison-arm-14393
+          path: out/**
