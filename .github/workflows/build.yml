@@ -1,5 +1,5 @@
 
-name: Build Unison ARM (Windows 10 Mobile 14393)
+name: Build Unison ARM (diagnostic)
 
 on:
   workflow_dispatch:
@@ -13,84 +13,38 @@ jobs:
 
       - uses: microsoft/setup-msbuild@v2
 
-      - name: Verify Windows SDK and UWP tools
-        shell: pwsh
-        run: |
-          $sdk = "${env:ProgramFiles(x86)}\Windows Kits\10\Lib\10.0.22621.0"
-
-          if (!(Test-Path $sdk)) {
-            throw "Windows SDK 10.0.22621.0 is missing!"
-          }
-
-          Write-Host "Windows SDK 22621 found."
-
-          Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Lib" |
-            Select-Object -ExpandProperty Name
-
-      - name: Patch minimum OS version
-        shell: pwsh
-        run: |
-          Get-ChildItem -Recurse -Filter *.csproj | ForEach-Object {
-            $file = $_.FullName
-            $content = Get-Content $file -Raw
-
-            $content = $content -replace `
-              '<TargetPlatformMinVersion>[^<]+</TargetPlatformMinVersion>', `
-              '<TargetPlatformMinVersion>10.0.14393.0</TargetPlatformMinVersion>'
-
-            Set-Content $file $content -NoNewline
-            Write-Host "Patched $file"
-          }
-
-          Get-ChildItem -Recurse -Filter Package.appxmanifest | ForEach-Object {
-            $file = $_.FullName
-            $content = Get-Content $file -Raw
-
-            $content = $content -replace `
-              'MinVersion="[^"]+"', `
-              'MinVersion="10.0.14393.0"'
-
-            Set-Content $file $content -NoNewline
-            Write-Host "Patched $file"
-          }
-
       - name: Diagnose UWP references
         shell: pwsh
         run: |
-          $kit = "${env:ProgramFiles(x86)}\Windows Kits\10"
+          Write-Host "=== MSBuild ==="
+          msbuild -version
 
-          Write-Host "=== Windows SDK directories ==="
-          Get-ChildItem "$kit\UnionMetadata" -ErrorAction SilentlyContinue |
-            Select-Object -ExpandProperty Name
-
-          Write-Host "=== Windows reference directories ==="
-          Get-ChildItem "$kit\References" -ErrorAction SilentlyContinue |
+          Write-Host "=== Windows SDK folders ==="
+          Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Lib" |
             Select-Object -ExpandProperty Name
 
           Write-Host "=== Windows.winmd files ==="
-          Get-ChildItem "$kit" -Filter Windows.winmd -Recurse `
-            -ErrorAction SilentlyContinue |
+          Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10" -Filter Windows.winmd -Recurse -ErrorAction SilentlyContinue |
             Select-Object -ExpandProperty FullName
 
-          Write-Host "=== UWP NuGet package ==="
-          $pkg = "$env:USERPROFILE\.nuget\packages\microsoft.netcore.universalwindowsplatform\6.2.14"
-          Write-Host "Package exists: $(Test-Path $pkg)"
+          Write-Host "=== UWP project references ==="
+          Get-ChildItem -Recurse -Filter Unison.Background.csproj |
+            Select-Object -ExpandProperty FullName
 
-          Write-Host "=== Visual Studio UWP workload ==="
-          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-
-          & $vswhere -latest -products '*' `
-            -requires Microsoft.VisualStudio.ComponentGroup.UWP.NetCoreAndStandard `
-            -property installationPath
-
-      - name: Verify patched versions
+      - name: Lower minimum OS version to 14393
         shell: pwsh
         run: |
-          Get-ChildItem -Recurse -Filter *.csproj |
-            Select-String "TargetPlatformMinVersion"
+          Get-ChildItem -Recurse -Filter Package.appxmanifest | ForEach-Object {
+            (Get-Content $_.FullName -Raw) `
+              -replace 'MinVersion="[^"]+"', 'MinVersion="10.0.14393.0"' |
+              Set-Content $_.FullName -NoNewline
+          }
 
-          Get-ChildItem -Recurse -Filter Package.appxmanifest |
-            Select-String 'MinVersion='
+          Get-ChildItem -Recurse -Filter *.csproj | ForEach-Object {
+            (Get-Content $_.FullName -Raw) `
+              -replace '<TargetPlatformMinVersion>[^<]+</TargetPlatformMinVersion>', '<TargetPlatformMinVersion>10.0.14393.0</TargetPlatformMinVersion>' |
+              Set-Content $_.FullName -NoNewline
+          }
 
       - name: Build ARM Release
         shell: pwsh
@@ -98,11 +52,9 @@ jobs:
           $proj = Get-ChildItem -Recurse -Filter Unison.Uwp.csproj |
             Select-Object -First 1
 
-          if (!$proj) {
-            throw "Unison.Uwp.csproj not found!"
+          if (-not $proj) {
+            throw "Unison.Uwp.csproj not found"
           }
-
-          Write-Host "Building $($proj.FullName)"
 
           msbuild $proj.FullName /restore `
             /p:Configuration=Release `
@@ -113,6 +65,8 @@ jobs:
             /p:AppxPackageDir="$env:GITHUB_WORKSPACE\out\"
 
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: unison-arm-14393
+          name: unison-arm-diagnostic
           path: out/**
+          if-no-files-found: ignore
